@@ -1,0 +1,21 @@
+[Unit]
+Description=Appraisal System Production
+After=network.target
+
+[Service]
+Type=notify
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/appraisal-system
+Environment=PATH=/opt/appraisal-system/venv/bin
+Environment=DJANGO_SETTINGS_MODULE=appraisal.settings_production
+ExecStart=/opt/appraisal-system/venv/bin/gunicorn --config gunicorn.conf.py appraisal.wsgi:application
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=5
+PrivateTmp=true
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target 
