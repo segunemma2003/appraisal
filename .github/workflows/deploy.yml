@@ -2,7 +2,7 @@ name: Deploy to EC2
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main]
 
@@ -41,7 +41,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-django pytest-cov
+          pip install pytest pytest-django
 
       - name: Run tests
         env:
@@ -49,46 +49,17 @@ jobs:
           SECRET_KEY: test-secret-key
           DEBUG: True
         run: |
-          python manage.py test --verbosity=2 --coverage
+          python manage.py test --verbosity=2
 
-      - name: Upload coverage reports
-        uses: codecov/codecov-action@v3
-
-  deploy-staging:
-    needs: test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/develop'
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy to Staging EC2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ env.EC2_IP }}
-          username: ${{ secrets.EC2_USERNAME }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_PORT }}
-          script: |
-            cd /opt/appraisal-system
-            git pull origin develop
-            source venv/bin/activate
-            pip install -r requirements.txt
-            python manage.py migrate
-            python manage.py collectstatic --noinput
-            sudo systemctl restart appraisal-staging
-            echo "Staging deployment completed for ${{ env.DOMAIN }}"
-
-  deploy-production:
+  deploy:
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    environment: production
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to Production EC2
+      - name: Deploy to EC2
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ env.EC2_IP }}
@@ -103,4 +74,4 @@ jobs:
             python manage.py migrate
             python manage.py collectstatic --noinput
             sudo systemctl restart appraisal-production
-            echo "Production deployment completed for ${{ env.DOMAIN }}"
+            echo "Deployment completed for ${{ env.DOMAIN }}"
