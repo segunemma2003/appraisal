@@ -83,7 +83,7 @@ sudo systemctl restart nginx
 # Set up SSL with Let's Encrypt (optional)
 echo "🔒 Setting up SSL certificate..."
 sudo apt install -y certbot python3-certbot-nginx
-# sudo certbot --nginx -d api.techonstreet.com
+# sudo certbot --nginx -d apes.techonstreet.com
 
 # Set up firewall
 echo "🔥 Configuring firewall..."
@@ -118,6 +118,6 @@ sudo systemctl start appraisal-production
 sudo systemctl start celery
 
 echo "✅ Server setup completed!"
-echo "🌐 Your application should be available at: https://api.techonstreet.com"
+echo "🌐 Your application should be available at: https://apes.techonstreet.com"
 echo "📊 Check service status with: sudo systemctl status appraisal-production"
 echo "📝 View logs with: sudo journalctl -u appraisal-production -f" 

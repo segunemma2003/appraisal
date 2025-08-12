@@ -26,7 +26,7 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-@labqcr&wq992ohd4f9nl
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,api.techonstreet.com,13.60.12.244').split(',')
+ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1,apes.techonstreet.com,13.60.12.244').split(',')
 
 
 # Application definition
@@ -184,8 +184,8 @@ REST_FRAMEWORK = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://api.techonstreet.com",
-    "http://api.techonstreet.com",
+    "https://apes.techonstreet.com",
+    "http://apes.techonstreet.com",
 ]
 
 CORS_ALLOW_CREDENTIALS = True
