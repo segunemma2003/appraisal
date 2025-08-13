@@ -67,12 +67,24 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           port: ${{ secrets.EC2_PORT }}
           script: |
-            echo "🚀 Starting deployment process..."
-
-            # Check if we're in the right directory
-            cd /opt/appraisal-system
+                        echo "🚀 Starting deployment process..."
+            
+            # Check if application directory exists
+            if [ ! -d "/opt/appraisal-system" ]; then
+              echo "❌ Application directory not found. Running initial setup..."
+              cd /home/ubuntu
+              git clone https://github.com/segunemma2003/appraisal.git appraisal-system
+              cd appraisal-system
+              chmod +x deployment/initial_server_setup.sh
+              ./deployment/initial_server_setup.sh
+              cd /opt/appraisal-system
+            else
+              echo "✅ Application directory found"
+              cd /opt/appraisal-system
+            fi
+            
             echo "📁 Current directory: $(pwd)"
-
+            
             # Check if .env file exists and has proper configuration
             if [ ! -f ".env" ]; then
               echo "❌ .env file not found. Creating from template..."
