@@ -71,20 +71,19 @@ sudo cp deployment/appraisal-production.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable appraisal-production
 
-# 14. Set up Nginx
-echo "🌐 Setting up Nginx..."
+# 14. Set up Nginx (only for SSL termination)
+echo "🌐 Setting up Nginx for SSL termination..."
 sudo cp deployment/nginx.conf /etc/nginx/sites-available/appraisal-system
 sudo ln -sf /etc/nginx/sites-available/appraisal-system /etc/nginx/sites-enabled/
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl restart nginx
 
-# 15. Set up firewall
+# 15. Set up firewall (allow port 8000, don't interfere with port 80)
 echo "🔥 Configuring firewall..."
 sudo ufw allow ssh
-sudo ufw allow 80
+sudo ufw allow 8000
 sudo ufw allow 443
-sudo ufw allow 8080
 sudo ufw --force enable
 
 # 16. Create log directory
@@ -141,12 +140,6 @@ else
     echo "❌ Django app is not responding on port 8000"
 fi
 
-if curl -s -I http://localhost:8080 > /dev/null; then
-    echo "✅ Nginx is responding on port 8080"
-else
-    echo "❌ Nginx is not responding on port 8080"
-fi
-
 # 24. Show final status
 echo ""
 echo "📋 Final Setup Status:"
@@ -156,13 +149,12 @@ echo "   PostgreSQL: $(sudo systemctl is-active postgresql)"
 echo "   Redis: $(sudo systemctl is-active redis-server)"
 echo "   Celery: $(sudo systemctl is-active celery)"
 echo "   Port 8000: $(sudo netstat -tlnp | grep :8000 | wc -l) listeners"
-echo "   Port 8080: $(sudo netstat -tlnp | grep :8080 | wc -l) listeners"
 
 echo ""
 echo "🔗 Access URLs:"
-echo "   Direct Django: http://13.60.12.244:8000"
-echo "   Via Nginx: http://13.60.12.244:8080"
-echo "   Domain: http://apes.techonstreet.com"
+echo "   Direct Django (HTTP): http://13.60.12.244:8000"
+echo "   Direct Django (HTTP): http://apes.techonstreet.com:8000"
+echo "   HTTPS (when SSL is set up): https://apes.techonstreet.com"
 
 echo ""
 echo "👤 Admin credentials:"
@@ -172,4 +164,4 @@ echo "   Email: admin@apes.techonstreet.com"
 
 echo ""
 echo "✅ Initial server setup completed!"
-echo "🌐 Your application should now be accessible!" 
+echo "🌐 Your application should now be accessible on port 8000!" 

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Startup Services Script
-# Handles nginx startup and SSL certificate setup
+# Handles Django app startup and SSL certificate setup
 
 set -e
 
@@ -48,8 +48,8 @@ else
     SSL_AVAILABLE=false
 fi
 
-# 6. Update nginx configuration
-echo "🌐 Updating nginx configuration..."
+# 6. Update nginx configuration (only for SSL)
+echo "🌐 Updating nginx configuration for SSL only..."
 sudo cp deployment/nginx.conf /etc/nginx/sites-available/appraisal-system
 
 # 7. Test nginx configuration
@@ -61,21 +61,8 @@ else
     exit 1
 fi
 
-# 8. Check if port 80 is already in use
-echo "🔍 Checking port 80 usage..."
-if sudo netstat -tlnp | grep -q ":80 "; then
-    echo "⚠️ Port 80 is already in use by another service"
-    echo "📋 Current port 80 listeners:"
-    sudo netstat -tlnp | grep ":80 "
-    echo "🔄 Using port 8080 instead"
-    PORT_CONFLICT=true
-else
-    echo "✅ Port 80 is available"
-    PORT_CONFLICT=false
-fi
-
-# 9. Start/restart nginx
-echo "🔄 Starting nginx..."
+# 8. Start/restart nginx (only for SSL termination)
+echo "🔄 Starting nginx for SSL termination..."
 if sudo systemctl is-active --quiet nginx; then
     echo "🔄 Restarting nginx..."
     sudo systemctl restart nginx
@@ -84,11 +71,11 @@ else
     sudo systemctl start nginx
 fi
 
-# 10. Enable nginx to start on boot
+# 9. Enable nginx to start on boot
 echo "🔧 Enabling nginx to start on boot..."
 sudo systemctl enable nginx
 
-# 11. Check nginx status
+# 10. Check nginx status
 echo "📊 Checking nginx status..."
 if sudo systemctl is-active --quiet nginx; then
     echo "✅ Nginx is running"
@@ -98,27 +85,7 @@ else
     exit 1
 fi
 
-# 12. Test nginx connectivity
-echo "🧪 Testing nginx connectivity..."
-if [ "$PORT_CONFLICT" = true ]; then
-    # Test port 8080
-    if curl -s -I http://localhost:8080 > /dev/null; then
-        echo "✅ Nginx is responding on port 8080"
-    else
-        echo "❌ Nginx is not responding on port 8080"
-        exit 1
-    fi
-else
-    # Test port 80
-    if curl -s -I http://localhost > /dev/null; then
-        echo "✅ Nginx is responding on port 80"
-    else
-        echo "❌ Nginx is not responding on port 80"
-        exit 1
-    fi
-fi
-
-# 13. Setup SSL certificate if not available
+# 11. Setup SSL certificate if not available
 if [ "$SSL_AVAILABLE" = false ]; then
     echo "🔒 Setting up SSL certificate..."
     echo "📝 Checking if domain is accessible for SSL setup..."
@@ -136,30 +103,21 @@ if [ "$SSL_AVAILABLE" = false ]; then
     fi
 fi
 
-# 14. Show final status
+# 12. Show final status
 echo ""
 echo "📋 Final Status:"
 echo "   Django App: $(sudo systemctl is-active appraisal-production)"
 echo "   Nginx: $(sudo systemctl is-active nginx)"
 echo "   Django Port 8000: $(sudo netstat -tlnp | grep :8000 | wc -l) listeners"
-if [ "$PORT_CONFLICT" = true ]; then
-    echo "   Nginx Port 8080: $(sudo netstat -tlnp | grep :8080 | wc -l) listeners"
-else
-    echo "   Nginx Port 80: $(sudo netstat -tlnp | grep :80 | wc -l) listeners"
-fi
 echo "   SSL Certificate: $SSL_AVAILABLE"
 
-# 15. Show access URLs
+# 13. Show access URLs
 echo ""
 echo "🔗 Access URLs:"
-echo "   Direct Django: http://13.60.12.244:8000"
-if [ "$PORT_CONFLICT" = true ]; then
-    echo "   Via Nginx: http://13.60.12.244:8080"
-else
-    echo "   Via Nginx: http://13.60.12.244"
-fi
+echo "   Direct Django (HTTP): http://13.60.12.244:8000"
+echo "   Direct Django (HTTP): http://apes.techonstreet.com:8000"
 if [ "$SSL_AVAILABLE" = true ]; then
-    echo "   HTTPS: https://apes.techonstreet.com"
+    echo "   HTTPS (via nginx): https://apes.techonstreet.com"
 fi
 
 echo ""

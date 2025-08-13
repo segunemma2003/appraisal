@@ -161,18 +161,15 @@ jobs:
             echo "   - Django app: $(sudo systemctl is-active appraisal-production)"
             echo "   - Nginx: $(sudo systemctl is-active nginx)"
             echo "   - Port 8000: $(sudo netstat -tlnp | grep :8000 | wc -l) listeners"
-            echo "   - Port 8080: $(sudo netstat -tlnp | grep :8080 | wc -l) listeners"
-            echo "   - Port 80: $(sudo netstat -tlnp | grep :80 | wc -l) listeners"
 
             # Check SSL status
             echo "   - SSL Certificate: $(if [ -f "/etc/letsencrypt/live/apes.techonstreet.com/fullchain.pem" ]; then echo '✅ Installed'; else echo '❌ Not installed'; fi)"
 
             echo "✅ Deployment completed for ${{ env.DOMAIN }}"
             echo "🔗 Access URLs:"
-            echo "   - Direct Django: http://13.60.12.244:8000"
-            echo "   - Via Nginx (port 8080): http://13.60.12.244:8080"
-            echo "   - Domain HTTP: http://${{ env.DOMAIN }}"
-            echo "   - Domain HTTPS: https://${{ env.DOMAIN }}"
+            echo "   - Direct Django (HTTP): http://13.60.12.244:8000"
+            echo "   - Direct Django (HTTP): http://${{ env.DOMAIN }}:8000"
+            echo "   - HTTPS (if SSL): https://${{ env.DOMAIN }}"
 
             # Test SSL if available
             if [ -f "/etc/letsencrypt/live/apes.techonstreet.com/fullchain.pem" ]; then
