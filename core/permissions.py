@@ -1,617 +1,366 @@
-from django.contrib.auth.models import Permission as DjangoPermission
-from django.contrib.contenttypes.models import ContentType
+from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.utils import timezone
-from django.db.models import Q
-from functools import wraps
-from typing import List, Dict, Any, Optional, Union
-import json
-
-from .models import (
-    Permission, Role, UserRole, PermissionOverride, PermissionAudit,
-    RolePermission, PermissionGroup, Department
-)
+from .models import UserRole, Permission, RolePermission, PermissionOverride
+from django.db import models
 
 
-class PermissionService:
-    """Comprehensive permission service for granular access control"""
+def get_user_permissions(user):
+    """
+    Get all permissions for a user based on their roles and overrides.
+    Returns a nested dictionary structure for easy permission checking.
+    """
+    cache_key = f"user_permissions_{user.id}"
+    permissions = cache.get(cache_key)
     
-    @staticmethod
-    def get_user_permissions(user, include_overrides=True, include_conditions=True):
-        """Get all permissions for a user including roles, overrides, and conditions"""
-        if not user.is_authenticated:
-            return set()
-        
-        cache_key = f"user_permissions_{user.id}_{include_overrides}_{include_conditions}"
-        permissions = cache.get(cache_key)
-        
-        if permissions is None:
-            permissions = set()
-            
-            # Get permissions from roles
-            user_roles = UserRole.objects.filter(
-                user=user,
-                is_active=True,
-                start_date__lte=timezone.now(),
-                end_date__isnull=True
-            ).select_related('role', 'department')
-            
-            for user_role in user_roles:
-                if user_role.is_current:
-                    role_permissions = PermissionService._get_role_permissions(
-                        user_role.role, 
-                        user_role.department,
-                        include_conditions
-                    )
-                    permissions.update(role_permissions)
-            
-            # Get permission overrides
-            if include_overrides:
-                overrides = PermissionOverride.objects.filter(
-                    user=user,
-                    is_active=True,
-                    start_date__lte=timezone.now(),
-                    end_date__isnull=True
-                ).select_related('permission')
-                
-                for override in overrides:
-                    if override.is_current:
-                        if override.override_type == 'grant':
-                            permissions.add(override.permission.codename)
-                        elif override.override_type == 'deny':
-                            permissions.discard(override.permission.codename)
-            
-            # Cache for 5 minutes
-            cache.set(cache_key, permissions, 300)
-        
-        return permissions
+    if permissions is None:
+        permissions = _build_user_permissions(user)
+        cache.set(cache_key, permissions, 300)  # Cache for 5 minutes
     
-    @staticmethod
-    def _get_role_permissions(role, department=None, include_conditions=True):
-        """Get permissions for a specific role with conditions"""
-        permissions = set()
-        
+    return permissions
+
+
+def _build_user_permissions(user):
+    """Build the complete permission structure for a user"""
+    permissions = {}
+    
+    # Get all active role assignments for the user
+    user_roles = UserRole.objects.filter(
+        user=user,
+        is_active=True,
+        start_date__lte=timezone.now()
+    ).filter(
+        models.Q(end_date__isnull=True) | models.Q(end_date__gte=timezone.now())
+    ).select_related('role', 'department')
+    
+    # Build permissions from roles
+    for user_role in user_roles:
         role_permissions = RolePermission.objects.filter(
-            role=role,
+            role=user_role.role,
             is_active=True
         ).select_related('permission')
         
-        for role_permission in role_permissions:
-            if include_conditions:
-                # Check conditions
-                if PermissionService._check_permission_conditions(
-                    role_permission.permission,
-                    role_permission.conditions,
-                    department
-                ):
-                    permissions.add(role_permission.permission.codename)
-            else:
-                permissions.add(role_permission.permission.codename)
-        
-        return permissions
+        for role_perm in role_permissions:
+            perm = role_perm.permission
+            resource_type = perm.resource_type
+            permission_type = perm.permission_type
+            
+            # Initialize resource type if not exists
+            if resource_type not in permissions:
+                permissions[resource_type] = {}
+            
+            # Initialize permission type if not exists
+            if permission_type not in permissions[resource_type]:
+                permissions[resource_type][permission_type] = []
+            
+            # Add permission with conditions and scope
+            permission_data = {
+                'permission_id': perm.id,
+                'codename': perm.codename,
+                'name': perm.name,
+                'conditions': role_perm.conditions,
+                'department_scope': user_role.department.id if user_role.department else None,
+                'role_id': user_role.role.id,
+                'role_name': user_role.role.name,
+            }
+            
+            permissions[resource_type][permission_type].append(permission_data)
     
-    @staticmethod
-    def _check_permission_conditions(permission, conditions, department=None):
-        """Check if permission conditions are met"""
-        if not conditions:
-            return True
+    # Apply permission overrides
+    overrides = PermissionOverride.objects.filter(
+        user=user,
+        is_active=True,
+        start_date__lte=timezone.now()
+    ).filter(
+        models.Q(end_date__isnull=True) | models.Q(end_date__gte=timezone.now())
+    ).select_related('permission')
+    
+    for override in overrides:
+        perm = override.permission
+        resource_type = perm.resource_type
+        permission_type = perm.permission_type
         
-        # Check department scope
-        if permission.department_scope and department:
-            if permission.department_scope != department:
-                return False
-        
-        # Check time-based conditions
-        if 'time_restrictions' in conditions:
-            time_restrictions = conditions['time_restrictions']
-            current_time = timezone.now().time()
+        if override.override_type == 'deny':
+            # Remove permission if it exists
+            if resource_type in permissions and permission_type in permissions[resource_type]:
+                permissions[resource_type][permission_type] = [
+                    p for p in permissions[resource_type][permission_type]
+                    if p['permission_id'] != perm.id
+                ]
+        elif override.override_type == 'grant':
+            # Add permission if it doesn't exist
+            if resource_type not in permissions:
+                permissions[resource_type] = {}
+            if permission_type not in permissions[resource_type]:
+                permissions[resource_type][permission_type] = []
             
-            if 'start_time' in time_restrictions:
-                if current_time < time_restrictions['start_time']:
-                    return False
+            permission_data = {
+                'permission_id': perm.id,
+                'codename': perm.codename,
+                'name': perm.name,
+                'conditions': {},
+                'department_scope': None,
+                'role_id': None,
+                'role_name': 'Override',
+                'override_type': 'grant',
+            }
             
-            if 'end_time' in time_restrictions:
-                if current_time > time_restrictions['end_time']:
-                    return False
-        
-        # Check day-based conditions
-        if 'day_restrictions' in conditions:
-            current_weekday = timezone.now().weekday()
-            if current_weekday not in conditions['day_restrictions']:
-                return False
-        
-        # Check IP restrictions
-        if 'ip_restrictions' in conditions:
-            # This would be implemented with request context
-            pass
-        
+            permissions[resource_type][permission_type].append(permission_data)
+    
+    return permissions
+
+
+def has_permission(user, permission_type, resource_type, **kwargs):
+    """
+    Check if a user has a specific permission.
+    
+    Args:
+        user: The user to check permissions for
+        permission_type: Type of permission (create, read, update, delete, etc.)
+        resource_type: Type of resource (user, role, evaluation, etc.)
+        **kwargs: Additional context for permission checking
+            - department_id: Check department-specific permissions
+            - object_id: Check object-specific permissions
+            - conditions: Additional conditions to check
+    
+    Returns:
+        bool: True if user has permission, False otherwise
+    """
+    if not user.is_authenticated:
+        return False
+    
+    # Superusers have all permissions
+    if user.is_superuser:
         return True
     
-    @staticmethod
-    def has_permission(user, permission_codename, resource_type=None, resource_id=None, department=None):
-        """Check if user has specific permission"""
-        if not user.is_authenticated:
+    # Get user permissions
+    user_permissions = get_user_permissions(user)
+    
+    # Check if user has the required permission type for the resource
+    if resource_type not in user_permissions:
+        return False
+    
+    if permission_type not in user_permissions[resource_type]:
+        return False
+    
+    permissions = user_permissions[resource_type][permission_type]
+    
+    # Check each permission for the user
+    for permission_data in permissions:
+        if _check_permission_conditions(permission_data, **kwargs):
+            return True
+    
+    return False
+
+
+def _check_permission_conditions(permission_data, **kwargs):
+    """Check if permission conditions are met"""
+    conditions = permission_data.get('conditions', {})
+    department_scope = permission_data.get('department_scope')
+    
+    # Check department scope
+    if department_scope is not None:
+        requested_department_id = kwargs.get('department_id')
+        if requested_department_id != department_scope:
             return False
-        
-        # Get user permissions
-        user_permissions = PermissionService.get_user_permissions(user)
-        
-        # Check for exact permission
-        if permission_codename in user_permissions:
-            return True
-        
-        # Check for wildcard permissions
-        wildcard_permission = f"{permission_codename}_*"
-        if wildcard_permission in user_permissions:
-            return True
-        
-        # Check for resource-specific permissions
-        if resource_type and resource_id:
-            resource_permission = f"{permission_codename}_{resource_type}_{resource_id}"
-            if resource_permission in user_permissions:
-                return True
-        
-        return False
     
-    @staticmethod
-    def has_any_permission(user, permission_codenames, resource_type=None, resource_id=None):
-        """Check if user has any of the specified permissions"""
-        for permission_codename in permission_codenames:
-            if PermissionService.has_permission(user, permission_codename, resource_type, resource_id):
-                return True
-        return False
-    
-    @staticmethod
-    def has_all_permissions(user, permission_codenames, resource_type=None, resource_id=None):
-        """Check if user has all of the specified permissions"""
-        for permission_codename in permission_codenames:
-            if not PermissionService.has_permission(user, permission_codename, resource_type, resource_id):
+    # Check custom conditions
+    for condition_key, condition_value in conditions.items():
+        if condition_key in kwargs:
+            if kwargs[condition_key] != condition_value:
                 return False
-        return True
+        else:
+            # If condition is required but not provided, deny permission
+            if condition_value is not None:
+                return False
     
-    @staticmethod
-    def get_permissions_for_resource(user, resource_type, resource_id=None):
-        """Get all permissions user has for a specific resource"""
-        user_permissions = PermissionService.get_user_permissions(user)
-        resource_permissions = set()
-        
-        for permission_codename in user_permissions:
-            if permission_codename.startswith(f"*_{resource_type}"):
-                resource_permissions.add(permission_codename)
-            elif resource_id and permission_codename.startswith(f"*_{resource_type}_{resource_id}"):
-                resource_permissions.add(permission_codename)
-        
-        return resource_permissions
+    return True
+
+
+def get_user_roles(user):
+    """Get all active roles for a user"""
+    cache_key = f"user_roles_{user.id}"
+    roles = cache.get(cache_key)
     
-    @staticmethod
-    def can_access_department_data(user, department):
-        """Check if user can access data from a specific department"""
-        # Check if user has department-specific permissions
-        if PermissionService.has_permission(user, 'read', 'department', department.id):
-            return True
-        
-        # Check if user belongs to the department
-        user_roles = UserRole.objects.filter(
+    if roles is None:
+        roles = list(UserRole.objects.filter(
             user=user,
             is_active=True,
-            department=department
+            start_date__lte=timezone.now()
+        ).filter(
+            models.Q(end_date__isnull=True) | models.Q(end_date__gte=timezone.now())
+        ).select_related('role', 'department'))
+        
+        cache.set(cache_key, roles, 300)  # Cache for 5 minutes
+    
+    return roles
+
+
+def has_role(user, role_codename, department_id=None):
+    """Check if user has a specific role"""
+    if not user.is_authenticated:
+        return False
+    
+    if user.is_superuser:
+        return True
+    
+    user_roles = get_user_roles(user)
+    
+    for user_role in user_roles:
+        if user_role.role.codename == role_codename:
+            if department_id is None or user_role.department_id == department_id:
+                return True
+    
+    return False
+
+
+def get_users_with_permission(permission_type, resource_type, department_id=None):
+    """Get all users who have a specific permission"""
+    
+    # Get all role permissions for this permission type and resource type
+    role_permissions = RolePermission.objects.filter(
+        permission__permission_type=permission_type,
+        permission__resource_type=resource_type,
+        is_active=True
+    ).select_related('role', 'permission')
+    
+    # Get users with these roles
+    user_ids = set()
+    
+    for role_perm in role_permissions:
+        user_roles = UserRole.objects.filter(
+            role=role_perm.role,
+            is_active=True,
+            start_date__lte=timezone.now()
+        ).filter(
+            models.Q(end_date__isnull=True) | models.Q(end_date__gte=timezone.now())
         )
         
-        return user_roles.exists()
+        if department_id is not None:
+            user_roles = user_roles.filter(department_id=department_id)
+        
+        user_ids.update(user_roles.values_list('user_id', flat=True))
     
-    @staticmethod
-    def filter_queryset_by_permissions(user, queryset, resource_type, permission_type='read'):
-        """Filter queryset based on user permissions"""
-        if not user.is_authenticated:
-            return queryset.none()
-        
-        # Get user's department access
-        user_departments = UserRole.objects.filter(
-            user=user,
-            is_active=True
-        ).values_list('department_id', flat=True).distinct()
-        
-        # Check if user has global access
-        if PermissionService.has_permission(user, f"{permission_type}_{resource_type}"):
-            return queryset
-        
-        # Filter by department access
-        if user_departments:
-            return queryset.filter(department_id__in=user_departments)
-        
-        return queryset.none()
+    # Add users with permission overrides
+    overrides = PermissionOverride.objects.filter(
+        permission__permission_type=permission_type,
+        permission__resource_type=resource_type,
+        override_type='grant',
+        is_active=True,
+        start_date__lte=timezone.now()
+    ).filter(
+        models.Q(end_date__isnull=True) | models.Q(end_date__gte=timezone.now())
+    )
+    
+    user_ids.update(overrides.values_list('user_id', flat=True))
+    
+    # Remove users with deny overrides
+    deny_overrides = PermissionOverride.objects.filter(
+        permission__permission_type=permission_type,
+        permission__resource_type=resource_type,
+        override_type='deny',
+        is_active=True,
+        start_date__lte=timezone.now()
+    ).filter(
+        models.Q(end_date__isnull=True) | models.Q(end_date__gte=timezone.now())
+    )
+    
+    denied_user_ids = set(deny_overrides.values_list('user_id', flat=True))
+    user_ids = user_ids - denied_user_ids
+    
+    return User.objects.filter(id__in=user_ids)
 
 
-class PermissionDecorator:
-    """Decorator for checking permissions in views"""
-    
-    @staticmethod
-    def require_permission(permission_codename, resource_type=None, resource_id_param=None):
-        """Decorator to require specific permission"""
-        def decorator(view_func):
-            @wraps(view_func)
-            def wrapper(request, *args, **kwargs):
-                resource_id = None
-                if resource_id_param and resource_id_param in kwargs:
-                    resource_id = kwargs[resource_id_param]
-                
-                if not PermissionService.has_permission(
-                    request.user, 
-                    permission_codename, 
-                    resource_type, 
-                    resource_id
-                ):
-                    from django.http import HttpResponseForbidden
-                    return HttpResponseForbidden("Permission denied")
-                
-                return view_func(request, *args, **kwargs)
-            return wrapper
-        return decorator
-    
-    @staticmethod
-    def require_any_permission(permission_codenames, resource_type=None, resource_id_param=None):
-        """Decorator to require any of the specified permissions"""
-        def decorator(view_func):
-            @wraps(view_func)
-            def wrapper(request, *args, **kwargs):
-                resource_id = None
-                if resource_id_param and resource_id_param in kwargs:
-                    resource_id = kwargs[resource_id_param]
-                
-                if not PermissionService.has_any_permission(
-                    request.user, 
-                    permission_codenames, 
-                    resource_type, 
-                    resource_id
-                ):
-                    from django.http import HttpResponseForbidden
-                    return HttpResponseForbidden("Permission denied")
-                
-                return view_func(request, *args, **kwargs)
-            return wrapper
-        return decorator
-    
-    @staticmethod
-    def require_all_permissions(permission_codenames, resource_type=None, resource_id_param=None):
-        """Decorator to require all of the specified permissions"""
-        def decorator(view_func):
-            @wraps(view_func)
-            def wrapper(request, *args, **kwargs):
-                resource_id = None
-                if resource_id_param and resource_id_param in kwargs:
-                    resource_id = kwargs[resource_id_param]
-                
-                if not PermissionService.has_all_permissions(
-                    request.user, 
-                    permission_codenames, 
-                    resource_type, 
-                    resource_id
-                ):
-                    from django.http import HttpResponseForbidden
-                    return HttpResponseForbidden("Permission denied")
-                
-                return view_func(request, *args, **kwargs)
-            return wrapper
-        return decorator
+def clear_user_permission_cache(user_id):
+    """Clear permission cache for a specific user"""
+    cache.delete(f"user_permissions_{user_id}")
+    cache.delete(f"user_roles_{user_id}")
 
 
-class RoleManagementService:
-    """Service for managing roles and permissions"""
-    
-    @staticmethod
-    def create_role(name, codename, description, role_type='system', department=None, permissions=None):
-        """Create a new role with permissions"""
-        role = Role.objects.create(
-            name=name,
-            codename=codename,
-            description=description,
-            role_type=role_type,
-            department=department
-        )
-        
-        if permissions:
-            for permission in permissions:
-                RolePermission.objects.create(
-                    role=role,
-                    permission=permission
-                )
-        
-        return role
-    
-    @staticmethod
-    def assign_role_to_user(user, role, department=None, start_date=None, end_date=None, assigned_by=None):
-        """Assign a role to a user"""
-        user_role = UserRole.objects.create(
-            user=user,
-            role=role,
-            department=department,
-            start_date=start_date or timezone.now(),
-            end_date=end_date,
-            assigned_by=assigned_by
-        )
-        
-        # Clear user permission cache
-        cache.delete(f"user_permissions_{user.id}_True_True")
-        cache.delete(f"user_permissions_{user.id}_True_False")
-        cache.delete(f"user_permissions_{user.id}_False_True")
-        cache.delete(f"user_permissions_{user.id}_False_False")
-        
-        return user_role
-    
-    @staticmethod
-    def grant_permission_override(user, permission, override_type, reason, granted_by=None, start_date=None, end_date=None):
-        """Grant a temporary permission override"""
-        override = PermissionOverride.objects.create(
-            user=user,
-            permission=permission,
-            override_type=override_type,
-            reason=reason,
-            granted_by=granted_by,
-            start_date=start_date or timezone.now(),
-            end_date=end_date
-        )
-        
-        # Log the override
-        PermissionAudit.objects.create(
-            user=user,
-            permission=permission,
-            action=f"override_{override_type}",
-            override=override,
-            reason=reason,
-            performed_by=granted_by
-        )
-        
-        # Clear user permission cache
-        cache.delete(f"user_permissions_{user.id}_True_True")
-        cache.delete(f"user_permissions_{user.id}_True_False")
-        
-        return override
-    
-    @staticmethod
-    def revoke_permission_override(override, revoked_by=None, reason=""):
-        """Revoke a permission override"""
-        override.is_active = False
-        override.save()
-        
-        # Log the revocation
-        PermissionAudit.objects.create(
-            user=override.user,
-            permission=override.permission,
-            action="override_revoked",
-            override=override,
-            reason=reason,
-            performed_by=revoked_by
-        )
-        
-        # Clear user permission cache
-        cache.delete(f"user_permissions_{override.user.id}_True_True")
-        cache.delete(f"user_permissions_{override.user.id}_True_False")
-        
-        return override
+def clear_all_permission_caches():
+    """Clear all permission caches (use sparingly)"""
+    # This is a simple approach - in production you might want to use cache versioning
+    # or more sophisticated cache invalidation
+    pass
 
 
-class PermissionTemplateService:
-    """Service for creating permission templates and groups"""
-    
-    @staticmethod
-    def create_system_permissions():
-        """Create default system permissions"""
-        permissions = []
-        
-        # Evaluation permissions
-        permissions.extend([
-            Permission.objects.get_or_create(
-                codename='create_evaluation',
-                defaults={
-                    'name': 'Create Evaluation',
-                    'description': 'Can create new evaluation forms',
-                    'permission_type': 'create',
-                    'resource_type': 'evaluation'
-                }
-            )[0],
-            Permission.objects.get_or_create(
-                codename='read_evaluation',
-                defaults={
-                    'name': 'Read Evaluation',
-                    'description': 'Can view evaluation forms',
-                    'permission_type': 'read',
-                    'resource_type': 'evaluation'
-                }
-            )[0],
-            Permission.objects.get_or_create(
-                codename='update_evaluation',
-                defaults={
-                    'name': 'Update Evaluation',
-                    'description': 'Can update evaluation forms',
-                    'permission_type': 'update',
-                    'resource_type': 'evaluation'
-                }
-            )[0],
-            Permission.objects.get_or_create(
-                codename='approve_evaluation',
-                defaults={
-                    'name': 'Approve Evaluation',
-                    'description': 'Can approve evaluation forms',
-                    'permission_type': 'approve',
-                    'resource_type': 'evaluation'
-                }
-            )[0],
-        ])
-        
-        # KPI permissions
-        permissions.extend([
-            Permission.objects.get_or_create(
-                codename='create_kpi',
-                defaults={
-                    'name': 'Create KPI',
-                    'description': 'Can create new KPI templates',
-                    'permission_type': 'create',
-                    'resource_type': 'kpi'
-                }
-            )[0],
-            Permission.objects.get_or_create(
-                codename='read_kpi',
-                defaults={
-                    'name': 'Read KPI',
-                    'description': 'Can view KPI templates',
-                    'permission_type': 'read',
-                    'resource_type': 'kpi'
-                }
-            )[0],
-            Permission.objects.get_or_create(
-                codename='update_kpi',
-                defaults={
-                    'name': 'Update KPI',
-                    'description': 'Can update KPI templates',
-                    'permission_type': 'update',
-                    'resource_type': 'kpi'
-                }
-            )[0],
-        ])
-        
-        # Goal permissions
-        permissions.extend([
-            Permission.objects.get_or_create(
-                codename='create_goal',
-                defaults={
-                    'name': 'Create Goal',
-                    'description': 'Can create new goals',
-                    'permission_type': 'create',
-                    'resource_type': 'goal'
-                }
-            )[0],
-            Permission.objects.get_or_create(
-                codename='read_goal',
-                defaults={
-                    'name': 'Read Goal',
-                    'description': 'Can view goals',
-                    'permission_type': 'read',
-                    'resource_type': 'goal'
-                }
-            )[0],
-            Permission.objects.get_or_create(
-                codename='update_goal',
-                defaults={
-                    'name': 'Update Goal',
-                    'description': 'Can update goals',
-                    'permission_type': 'update',
-                    'resource_type': 'goal'
-                }
-            )[0],
-        ])
-        
-        # Analytics permissions
-        permissions.extend([
-            Permission.objects.get_or_create(
-                codename='view_analytics',
-                defaults={
-                    'name': 'View Analytics',
-                    'description': 'Can view analytics and reports',
-                    'permission_type': 'view_analytics',
-                    'resource_type': 'analytics'
-                }
-            )[0],
-            Permission.objects.get_or_create(
-                codename='export_analytics',
-                defaults={
-                    'name': 'Export Analytics',
-                    'description': 'Can export analytics data',
-                    'permission_type': 'export',
-                    'resource_type': 'analytics'
-                }
-            )[0],
-        ])
-        
-        # User management permissions
-        permissions.extend([
-            Permission.objects.get_or_create(
-                codename='manage_users',
-                defaults={
-                    'name': 'Manage Users',
-                    'description': 'Can manage user accounts and roles',
-                    'permission_type': 'manage_users',
-                    'resource_type': 'user'
-                }
-            )[0],
-            Permission.objects.get_or_create(
-                codename='configure_system',
-                defaults={
-                    'name': 'Configure System',
-                    'description': 'Can configure system settings',
-                    'permission_type': 'configure_system',
-                    'resource_type': 'system_config'
-                }
-            )[0],
-        ])
-        
-        return permissions
-    
-    @staticmethod
-    def create_default_roles():
-        """Create default system roles"""
-        # Create permissions first
-        permissions = PermissionTemplateService.create_system_permissions()
-        
-        # Create role-permission mappings
-        role_permissions = {
-            'staff': [
-                'read_evaluation', 'update_evaluation', 'create_goal', 
-                'read_goal', 'update_goal'
-            ],
-            'supervisor': [
-                'read_evaluation', 'update_evaluation', 'approve_evaluation',
-                'create_goal', 'read_goal', 'update_goal', 'view_analytics'
-            ],
-            'hr_officer': [
-                'create_evaluation', 'read_evaluation', 'update_evaluation',
-                'create_kpi', 'read_kpi', 'update_kpi',
-                'create_goal', 'read_goal', 'update_goal',
-                'view_analytics', 'export_analytics', 'manage_users'
-            ],
-            'admin': [
-                'create_evaluation', 'read_evaluation', 'update_evaluation', 'delete_evaluation',
-                'create_kpi', 'read_kpi', 'update_kpi', 'delete_kpi',
-                'create_goal', 'read_goal', 'update_goal', 'delete_goal',
-                'view_analytics', 'export_analytics', 'manage_users', 'configure_system'
-            ]
-        }
-        
-        roles = []
-        for role_name, permission_codenames in role_permissions.items():
-            role, created = Role.objects.get_or_create(
-                codename=role_name,
-                defaults={
-                    'name': role_name.replace('_', ' ').title(),
-                    'description': f'Default {role_name} role',
-                    'role_type': 'system',
-                    'is_system_role': True
-                }
-            )
-            
-            if created:
-                # Assign permissions
-                for codename in permission_codenames:
-                    try:
-                        permission = Permission.objects.get(codename=codename)
-                        RolePermission.objects.create(role=role, permission=permission)
-                    except Permission.DoesNotExist:
-                        pass
-            
-            roles.append(role)
-        
-        return roles
+# Permission decorators for views
+def require_permission(permission_type, resource_type):
+    """Decorator to require a specific permission for a view"""
+    def decorator(view_func):
+        def wrapper(request, *args, **kwargs):
+            if not has_permission(request.user, permission_type, resource_type):
+                from rest_framework.response import Response
+                from rest_framework import status
+                return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+            return view_func(request, *args, **kwargs)
+        return wrapper
+    return decorator
 
 
-# Context processor for templates
-def user_permissions(request):
-    """Add user permissions to template context"""
-    if request.user.is_authenticated:
-        permissions = PermissionService.get_user_permissions(request.user)
-        return {
-            'user_permissions': permissions,
-            'has_permission': lambda perm: perm in permissions
-        }
-    return {
-        'user_permissions': set(),
-        'has_permission': lambda perm: False
-    } 
+def require_role(role_codename, department_id=None):
+    """Decorator to require a specific role for a view"""
+    def decorator(view_func):
+        def wrapper(request, *args, **kwargs):
+            if not has_role(request.user, role_codename, department_id):
+                from rest_framework.response import Response
+                from rest_framework import status
+                return Response({'error': 'Role required'}, status=status.HTTP_403_FORBIDDEN)
+            return view_func(request, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
+# Utility functions for common permission checks
+def can_manage_users(user, department_id=None):
+    """Check if user can manage users"""
+    return has_permission(user, 'manage_users', 'user', department_id=department_id)
+
+
+def can_manage_roles(user, department_id=None):
+    """Check if user can manage roles"""
+    return has_permission(user, 'create', 'role', department_id=department_id) or \
+           has_permission(user, 'update', 'role', department_id=department_id) or \
+           has_permission(user, 'delete', 'role', department_id=department_id)
+
+
+def can_approve_evaluations(user, department_id=None):
+    """Check if user can approve evaluations"""
+    return has_permission(user, 'approve', 'evaluation', department_id=department_id)
+
+
+def can_view_analytics(user, department_id=None):
+    """Check if user can view analytics"""
+    return has_permission(user, 'view_analytics', 'analytics', department_id=department_id)
+
+
+def can_configure_system(user):
+    """Check if user can configure system settings"""
+    return has_permission(user, 'configure_system', 'system_config')
+
+
+def is_hr_user(user):
+    """Check if user has HR role"""
+    return has_role(user, 'hr')
+
+
+def is_admin_user(user):
+    """Check if user has admin role"""
+    return has_role(user, 'admin') or user.is_superuser
+
+
+def is_supervisor_user(user):
+    """Check if user has supervisor role"""
+    return has_role(user, 'supervisor')
+
+
+def get_user_department_scope(user):
+    """Get the department scope for a user's permissions"""
+    user_roles = get_user_roles(user)
+    departments = set()
+    
+    for user_role in user_roles:
+        if user_role.department:
+            departments.add(user_role.department.id)
+    
+    return list(departments) if departments else None 

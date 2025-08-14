@@ -109,28 +109,126 @@ class Role(models.Model):
         ('department', 'Department Role'),
         ('project', 'Project Role'),
         ('temporary', 'Temporary Role'),
+        ('functional', 'Functional Role'),
+        ('leadership', 'Leadership Role'),
+        ('specialist', 'Specialist Role'),
+    ]
+
+    ROLE_LEVEL_CHOICES = [
+        ('entry', 'Entry Level'),
+        ('junior', 'Junior Level'),
+        ('mid', 'Mid Level'),
+        ('senior', 'Senior Level'),
+        ('lead', 'Lead Level'),
+        ('manager', 'Manager Level'),
+        ('director', 'Director Level'),
+        ('executive', 'Executive Level'),
     ]
 
     name = models.CharField(max_length=200)
     codename = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True)
     role_type = models.CharField(max_length=20, choices=ROLE_TYPE_CHOICES, default='system')
+    role_level = models.CharField(max_length=20, choices=ROLE_LEVEL_CHOICES, default='mid')
     department = models.ForeignKey(Department, on_delete=models.SET_NULL, null=True, blank=True)
+    
+    # Role hierarchy and relationships
+    parent_role = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='child_roles')
+    can_manage_roles = models.ManyToManyField('self', blank=True, related_name='managed_by_roles', symmetrical=False)
+    can_create_kpis_for = models.ManyToManyField('self', blank=True, related_name='kpis_created_by_roles', symmetrical=False)
+    can_evaluate_roles = models.ManyToManyField('self', blank=True, related_name='evaluated_by_roles', symmetrical=False)
+    
+    # Role capabilities
+    max_subordinates = models.PositiveIntegerField(default=0)  # 0 = unlimited
+    can_approve_evaluations = models.BooleanField(default=False)
+    can_create_evaluations = models.BooleanField(default=False)
+    can_view_analytics = models.BooleanField(default=False)
+    can_manage_users = models.BooleanField(default=False)
+    can_configure_system = models.BooleanField(default=False)
+    
+    # Role constraints
     is_active = models.BooleanField(default=True)
     is_system_role = models.BooleanField(default=False)
+    requires_approval = models.BooleanField(default=False)
+    approval_required_by = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='approval_roles')
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['name']
+        ordering = ['role_level', 'name']
         indexes = [
             models.Index(fields=['codename']),
             models.Index(fields=['role_type', 'department']),
+            models.Index(fields=['role_level']),
             models.Index(fields=['is_active']),
         ]
 
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.get_role_level_display()})"
+
+    @property
+    def can_manage_other_roles(self):
+        """Check if this role can manage other roles"""
+        return self.can_manage_roles.exists() or self.role_level in ['manager', 'director', 'executive']
+
+    @property
+    def can_create_kpis(self):
+        """Check if this role can create KPIs for other roles"""
+        return self.can_create_kpis_for.exists() or self.role_level in ['lead', 'manager', 'director', 'executive']
+
+    @property
+    def can_evaluate_others(self):
+        """Check if this role can evaluate other roles"""
+        return self.can_evaluate_roles.exists() or self.role_level in ['lead', 'manager', 'director', 'executive']
+
+    def get_manageable_roles(self):
+        """Get all roles this role can manage"""
+        return self.can_manage_roles.all()
+
+    def get_kpi_creatable_roles(self):
+        """Get all roles this role can create KPIs for"""
+        return self.can_create_kpis_for.all()
+
+    def get_evaluatable_roles(self):
+        """Get all roles this role can evaluate"""
+        return self.can_evaluate_roles.all()
+
+    def can_manage_role(self, target_role):
+        """Check if this role can manage a specific target role"""
+        if self.role_level == 'executive':
+            return True
+        if self.role_level == 'director' and target_role.role_level in ['entry', 'junior', 'mid', 'senior', 'lead', 'manager']:
+            return True
+        if self.role_level == 'manager' and target_role.role_level in ['entry', 'junior', 'mid', 'senior', 'lead']:
+            return True
+        if self.role_level == 'lead' and target_role.role_level in ['entry', 'junior', 'mid', 'senior']:
+            return True
+        return target_role in self.can_manage_roles.all()
+
+    def can_create_kpi_for_role(self, target_role):
+        """Check if this role can create KPIs for a specific target role"""
+        if self.role_level == 'executive':
+            return True
+        if self.role_level == 'director' and target_role.role_level in ['entry', 'junior', 'mid', 'senior', 'lead', 'manager']:
+            return True
+        if self.role_level == 'manager' and target_role.role_level in ['entry', 'junior', 'mid', 'senior', 'lead']:
+            return True
+        if self.role_level == 'lead' and target_role.role_level in ['entry', 'junior', 'mid', 'senior']:
+            return True
+        return target_role in self.can_create_kpis_for.all()
+
+    def can_evaluate_role(self, target_role):
+        """Check if this role can evaluate a specific target role"""
+        if self.role_level == 'executive':
+            return True
+        if self.role_level == 'director' and target_role.role_level in ['entry', 'junior', 'mid', 'senior', 'lead', 'manager']:
+            return True
+        if self.role_level == 'manager' and target_role.role_level in ['entry', 'junior', 'mid', 'senior', 'lead']:
+            return True
+        if self.role_level == 'lead' and target_role.role_level in ['entry', 'junior', 'mid', 'senior']:
+            return True
+        return target_role in self.can_evaluate_roles.all()
 
 
 class RolePermission(models.Model):

@@ -26,13 +26,18 @@ class EvaluationPeriod(models.Model):
 
 
 class KPITemplate(models.Model):
-    """Dynamic KPI templates that can be reused and customized"""
+    """Dynamic KPI templates with role-based creation permissions"""
     KPI_TYPE_CHOICES = [
         ('quantitative', 'Quantitative'),
         ('qualitative', 'Qualitative'),
         ('percentage', 'Percentage'),
         ('currency', 'Currency'),
         ('boolean', 'Yes/No'),
+        ('rating', 'Rating'),
+        ('count', 'Count'),
+        ('duration', 'Duration'),
+        ('ratio', 'Ratio'),
+        ('index', 'Index'),
     ]
     
     VISIBILITY_CHOICES = [
@@ -41,26 +46,68 @@ class KPITemplate(models.Model):
         ('hr', 'HR Only'),
         ('department', 'Department Specific'),
         ('role', 'Role Specific'),
+        ('level', 'Level Specific'),
+        ('custom', 'Custom Targeting'),
     ]
     
+    # Basic KPI information
     name = models.CharField(max_length=200)
     description = models.TextField()
     kpi_type = models.CharField(max_length=20, choices=KPI_TYPE_CHOICES)
     visibility = models.CharField(max_length=20, choices=VISIBILITY_CHOICES, default='all')
-    target_departments = models.ManyToManyField(Department, blank=True)
-    target_roles = models.JSONField(default=list, blank=True)  # List of role names
-    unit_of_measure = models.CharField(max_length=50, blank=True)  # e.g., "sales", "hours", "%"
+    
+    # Role-based targeting
+    target_roles = models.ManyToManyField('core.Role', blank=True, related_name='kpi_templates')
+    target_staff_levels = models.JSONField(default=list, blank=True)
+    target_departments = models.ManyToManyField('core.Department', blank=True, related_name='kpi_templates')
+    target_positions = models.ManyToManyField('core.Position', blank=True, related_name='kpi_templates')
+    
+    # KPI configuration
+    unit_of_measure = models.CharField(max_length=50, blank=True)
     min_value = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     max_value = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     default_weight = models.DecimalField(max_digits=5, decimal_places=2, default=1.00)
+    target_value = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    threshold_value = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    
+    # Auto-calculation settings
     is_auto_calculated = models.BooleanField(default=False)
-    data_source = models.CharField(max_length=100, blank=True)  # Integration source
-    calculation_formula = models.TextField(blank=True)  # For auto-calculated KPIs
+    data_source = models.CharField(max_length=100, blank=True)
+    calculation_formula = models.TextField(blank=True)
+    calculation_frequency = models.CharField(max_length=20, choices=[
+        ('daily', 'Daily'),
+        ('weekly', 'Weekly'),
+        ('monthly', 'Monthly'),
+        ('quarterly', 'Quarterly'),
+        ('yearly', 'Yearly'),
+        ('on_demand', 'On Demand'),
+    ], default='monthly')
+    
+    # Creation permissions
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_by_role = models.ForeignKey('core.Role', on_delete=models.SET_NULL, null=True, blank=True, related_name='created_kpis')
+    creation_permissions = models.JSONField(default=dict, blank=True)  # Who can create this KPI
+    
+    # KPI behavior
     is_active = models.BooleanField(default=True)
-    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    is_template = models.BooleanField(default=False)
+    template_category = models.CharField(max_length=50, blank=True)
+    requires_approval = models.BooleanField(default=False)
+    approval_workflow = models.ForeignKey('ApprovalWorkflow', on_delete=models.SET_NULL, null=True, blank=True)
+    
+    # Scoring and evaluation
+    scoring_method = models.CharField(max_length=20, choices=[
+        ('linear', 'Linear'),
+        ('exponential', 'Exponential'),
+        ('threshold', 'Threshold'),
+        ('custom', 'Custom Formula'),
+    ], default='linear')
+    scoring_criteria = models.JSONField(default=dict, blank=True)
+    
+    # Metadata
+    version = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    version = models.PositiveIntegerField(default=1)
 
     class Meta:
         ordering = ['name']
@@ -68,6 +115,159 @@ class KPITemplate(models.Model):
 
     def __str__(self):
         return f"{self.name} (v{self.version})"
+
+    @property
+    def is_role_specific(self):
+        """Check if this KPI is targeted to specific roles"""
+        return self.visibility == 'role' and self.target_roles.exists()
+
+    @property
+    def is_level_specific(self):
+        """Check if this KPI is targeted to specific staff levels"""
+        return self.visibility == 'level' and bool(self.target_staff_levels)
+
+    def is_visible_for_user(self, user):
+        """Check if this KPI should be visible for a specific user"""
+        user_roles = user.core_user_roles.filter(is_active=True)
+        user_department = getattr(user.profile, 'department', None)
+        user_position = getattr(user.profile, 'position', None)
+        
+        # Check visibility settings
+        if self.visibility == 'all':
+            return True
+        elif self.visibility == 'management':
+            return any(ur.role.role_level in ['manager', 'director', 'executive'] for ur in user_roles)
+        elif self.visibility == 'hr':
+            return any(ur.role.codename == 'hr' for ur in user_roles)
+        elif self.visibility == 'department':
+            return user_department and user_department in self.target_departments.all()
+        elif self.visibility == 'role':
+            return any(ur.role in self.target_roles.all() for ur in user_roles)
+        elif self.visibility == 'level':
+            if user_position:
+                return user_position.staff_level in self.target_staff_levels
+            return False
+        elif self.visibility == 'custom':
+            # Check all targeting criteria
+            if self.target_roles.exists():
+                if not any(ur.role in self.target_roles.all() for ur in user_roles):
+                    return False
+            if self.target_staff_levels and user_position:
+                if user_position.staff_level not in self.target_staff_levels:
+                    return False
+            if self.target_departments.exists():
+                if not user_department or user_department not in self.target_departments.all():
+                    return False
+            if self.target_positions.exists():
+                if not user_position or user_position not in self.target_positions.all():
+                    return False
+            return True
+        
+        return False
+
+    def can_be_created_by_user(self, user):
+        """Check if a user can create this type of KPI"""
+        user_roles = user.core_user_roles.filter(is_active=True)
+        
+        # Check creation permissions
+        for user_role in user_roles:
+            if user_role.role.can_create_kpis:
+                # Check if user's role can create KPIs for target roles
+                if self.target_roles.exists():
+                    for target_role in self.target_roles.all():
+                        if user_role.role.can_create_kpi_for_role(target_role):
+                            return True
+                else:
+                    # No specific target roles, check general permission
+                    return True
+        
+        return False
+
+    def calculate_score(self, actual_value):
+        """Calculate score based on actual value and scoring criteria"""
+        if not actual_value or not self.is_active:
+            return 0
+        
+        try:
+            actual = float(actual_value)
+            target = float(self.target_value) if self.target_value else 0
+            threshold = float(self.threshold_value) if self.threshold_value else 0
+            
+            if self.scoring_method == 'linear':
+                if target > 0:
+                    return min((actual / target) * 100, 100)
+                return 0
+            
+            elif self.scoring_method == 'threshold':
+                if actual >= threshold:
+                    return 100
+                elif actual > 0:
+                    return (actual / threshold) * 100
+                return 0
+            
+            elif self.scoring_method == 'exponential':
+                if target > 0:
+                    ratio = actual / target
+                    return min((ratio ** 2) * 100, 100)
+                return 0
+            
+            elif self.scoring_method == 'custom':
+                # Use custom formula from scoring_criteria
+                formula = self.scoring_criteria.get('formula', '')
+                if formula:
+                    # This would need a safe formula evaluator
+                    return self._evaluate_custom_formula(formula, actual, target, threshold)
+                return 0
+            
+            return 0
+            
+        except (ValueError, TypeError):
+            return 0
+
+    def _evaluate_custom_formula(self, formula, actual, target, threshold):
+        """Evaluate custom scoring formula (simplified implementation)"""
+        try:
+            # This is a simplified implementation
+            # In production, you'd want a proper formula parser
+            if 'actual' in formula and 'target' in formula:
+                # Replace variables with values
+                eval_formula = formula.replace('actual', str(actual)).replace('target', str(target))
+                return min(eval(eval_formula), 100)
+            return 0
+        except:
+            return 0
+
+    def clone_kpi(self, new_name=None, new_version=None):
+        """Clone this KPI for reuse"""
+        new_kpi = KPITemplate.objects.create(
+            name=new_name or f"{self.name} (Copy)",
+            description=self.description,
+            kpi_type=self.kpi_type,
+            visibility=self.visibility,
+            unit_of_measure=self.unit_of_measure,
+            min_value=self.min_value,
+            max_value=self.max_value,
+            default_weight=self.default_weight,
+            target_value=self.target_value,
+            threshold_value=self.threshold_value,
+            is_auto_calculated=self.is_auto_calculated,
+            data_source=self.data_source,
+            calculation_formula=self.calculation_formula,
+            calculation_frequency=self.calculation_frequency,
+            scoring_method=self.scoring_method,
+            scoring_criteria=self.scoring_criteria,
+            is_template=True,
+            template_category=self.template_category,
+            version=new_version or 1
+        )
+        
+        # Copy targeting
+        new_kpi.target_roles.set(self.target_roles.all())
+        new_kpi.target_staff_levels = self.target_staff_levels
+        new_kpi.target_departments.set(self.target_departments.all())
+        new_kpi.target_positions.set(self.target_positions.all())
+        
+        return new_kpi
 
 
 class AppraisalFormTemplate(models.Model):
@@ -224,10 +424,16 @@ class PeerFeedback(models.Model):
 
 
 class EvaluationQuestion(models.Model):
-    """Dynamic evaluation questions"""
+    """Dynamic evaluation questions with role-based targeting"""
     STAFF_LEVEL_CHOICES = [
-        ('junior', 'Junior Staff'),
-        ('senior', 'Senior Staff'),
+        ('entry', 'Entry Level'),
+        ('junior', 'Junior Level'),
+        ('mid', 'Mid Level'),
+        ('senior', 'Senior Level'),
+        ('lead', 'Lead Level'),
+        ('manager', 'Manager Level'),
+        ('director', 'Director Level'),
+        ('executive', 'Executive Level'),
     ]
     
     SECTION_CHOICES = [
@@ -237,6 +443,20 @@ class EvaluationQuestion(models.Model):
         ('responsibilities', 'Responsibilities'),
         ('challenges', 'Challenges'),
         ('goals', 'Goals'),
+        ('leadership', 'Leadership'),
+        ('teamwork', 'Teamwork'),
+        ('innovation', 'Innovation'),
+        ('communication', 'Communication'),
+        ('problem_solving', 'Problem Solving'),
+        ('technical_skills', 'Technical Skills'),
+        ('project_management', 'Project Management'),
+        ('customer_service', 'Customer Service'),
+        ('quality_management', 'Quality Management'),
+        ('compliance', 'Compliance'),
+        ('safety', 'Safety'),
+        ('performance', 'Performance'),
+        ('development', 'Development'),
+        ('feedback', 'Feedback'),
     ]
     
     QUESTION_TYPE_CHOICES = [
@@ -245,25 +465,170 @@ class EvaluationQuestion(models.Model):
         ('select', 'Select'),
         ('date', 'Date'),
         ('number', 'Number'),
+        ('rating', 'Rating'),
+        ('boolean', 'Yes/No'),
+        ('file_upload', 'File Upload'),
+        ('signature', 'Digital Signature'),
+        ('matrix', 'Matrix Question'),
+        ('ranking', 'Ranking'),
+        ('scale', 'Scale'),
     ]
     
+    # Basic question information
     question_text = models.CharField(max_length=500)
     section = models.CharField(max_length=20, choices=SECTION_CHOICES)
-    staff_level = models.CharField(max_length=10, choices=STAFF_LEVEL_CHOICES)
     question_type = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES)
-    options = models.TextField(blank=True)  # For select questions
+    
+    # Role-based targeting
+    target_roles = models.ManyToManyField('core.Role', blank=True, related_name='evaluation_questions')
+    target_staff_levels = models.JSONField(default=list, blank=True)  # List of staff levels
+    target_departments = models.ManyToManyField('core.Department', blank=True, related_name='evaluation_questions')
+    
+    # Question configuration
+    options = models.TextField(blank=True)  # For select, rating, scale questions
+    min_value = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    max_value = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    default_value = models.TextField(blank=True)
+    placeholder_text = models.CharField(max_length=200, blank=True)
+    help_text = models.TextField(blank=True)
+    
+    # Question behavior
     required = models.BooleanField(default=True)
     order = models.PositiveIntegerField()
+    weight = models.DecimalField(max_digits=5, decimal_places=2, default=1.00)
+    is_scored = models.BooleanField(default=True)
+    scoring_criteria = models.JSONField(default=dict, blank=True)
+    
+    # Conditional logic
+    depends_on_question = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='dependent_questions')
+    condition_type = models.CharField(max_length=20, choices=[
+        ('equals', 'Equals'),
+        ('not_equals', 'Not Equals'),
+        ('contains', 'Contains'),
+        ('greater_than', 'Greater Than'),
+        ('less_than', 'Less Than'),
+        ('is_empty', 'Is Empty'),
+        ('is_not_empty', 'Is Not Empty'),
+    ], blank=True)
+    condition_value = models.TextField(blank=True)
+    
+    # Question metadata
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     is_active = models.BooleanField(default=True)
+    is_template = models.BooleanField(default=False)
+    template_category = models.CharField(max_length=50, blank=True)
+    version = models.PositiveIntegerField(default=1)
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ['staff_level', 'section', 'order']
-        unique_together = ['section', 'staff_level', 'order']
+        ordering = ['section', 'order']
+        unique_together = ['section', 'order', 'version']
 
     def __str__(self):
         return f"{self.get_section_display()} - {self.question_text[:50]}"
+
+    @property
+    def is_conditional(self):
+        """Check if this question has conditional logic"""
+        return bool(self.depends_on_question and self.condition_type)
+
+    def is_visible_for_user(self, user):
+        """Check if this question should be visible for a specific user"""
+        user_roles = user.core_user_roles.filter(is_active=True)
+        user_department = getattr(user.profile, 'department', None)
+        
+        # Check role targeting
+        if self.target_roles.exists():
+            if not any(ur.role in self.target_roles.all() for ur in user_roles):
+                return False
+        
+        # Check staff level targeting
+        if self.target_staff_levels:
+            user_staff_level = getattr(user.profile.position, 'staff_level', 'junior')
+            if user_staff_level not in self.target_staff_levels:
+                return False
+        
+        # Check department targeting
+        if self.target_departments.exists():
+            if not user_department or user_department not in self.target_departments.all():
+                return False
+        
+        return True
+
+    def get_options_list(self):
+        """Get options as a list for select/rating questions"""
+        if not self.options:
+            return []
+        return [option.strip() for option in self.options.split('\n') if option.strip()]
+
+    def get_scoring_criteria(self):
+        """Get scoring criteria for the question"""
+        return self.scoring_criteria or {}
+
+    def calculate_score(self, answer_value):
+        """Calculate score based on answer and scoring criteria"""
+        if not self.is_scored or not answer_value:
+            return 0
+        
+        criteria = self.get_scoring_criteria()
+        
+        if self.question_type == 'rating':
+            try:
+                rating = float(answer_value)
+                max_rating = criteria.get('max_rating', 5)
+                return (rating / max_rating) * self.weight
+            except (ValueError, TypeError):
+                return 0
+        
+        elif self.question_type == 'select':
+            option_scores = criteria.get('option_scores', {})
+            return option_scores.get(str(answer_value), 0) * self.weight
+        
+        elif self.question_type == 'number':
+            try:
+                value = float(answer_value)
+                min_val = criteria.get('min_value', self.min_value)
+                max_val = criteria.get('max_value', self.max_value)
+                
+                if min_val and max_val:
+                    normalized = (value - min_val) / (max_val - min_val)
+                    return normalized * self.weight
+                return value * self.weight
+            except (ValueError, TypeError):
+                return 0
+        
+        return 0
+
+    def clone_question(self, new_section=None, new_order=None):
+        """Clone this question for reuse"""
+        new_question = EvaluationQuestion.objects.create(
+            question_text=self.question_text,
+            section=new_section or self.section,
+            question_type=self.question_type,
+            options=self.options,
+            min_value=self.min_value,
+            max_value=self.max_value,
+            default_value=self.default_value,
+            placeholder_text=self.placeholder_text,
+            help_text=self.help_text,
+            required=self.required,
+            order=new_order or self.order,
+            weight=self.weight,
+            is_scored=self.is_scored,
+            scoring_criteria=self.scoring_criteria,
+            is_template=True,
+            template_category=self.template_category,
+            version=1
+        )
+        
+        # Copy targeting
+        new_question.target_roles.set(self.target_roles.all())
+        new_question.target_staff_levels = self.target_staff_levels
+        new_question.target_departments.set(self.target_departments.all())
+        
+        return new_question
 
 
 class PerformanceAspect(models.Model):
