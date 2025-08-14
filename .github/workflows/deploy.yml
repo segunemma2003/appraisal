@@ -135,6 +135,10 @@ jobs:
                 print('Superuser already exists')
             "
 
+            # Run seed data script to populate default data
+            echo "🌱 Running seed data script..."
+            python seed_data.py
+
             # Check service status before restart
             echo "📊 Checking service status before restart..."
             sudo systemctl status appraisal-production --no-pager -l || echo "Service not running or not found"

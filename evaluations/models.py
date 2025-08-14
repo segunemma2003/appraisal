@@ -286,7 +286,7 @@ class AppraisalFormTemplate(models.Model):
     target_departments = models.ManyToManyField(Department, blank=True)
     target_staff_levels = models.JSONField(default=list, blank=True)
     kpis = models.ManyToManyField(KPITemplate, through='FormKPI')
-    approval_workflow = models.ForeignKey(ApprovalWorkflow, on_delete=models.SET_NULL, null=True, blank=True)
+    approval_workflow = models.ForeignKey('ApprovalWorkflow', on_delete=models.SET_NULL, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
