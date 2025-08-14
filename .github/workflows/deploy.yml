@@ -112,9 +112,20 @@ jobs:
 
             # Run Django checks
             echo "🔧 Running Django checks..."
-            python manage.py check --deploy
+            if ! python manage.py check --deploy; then
+              echo "⚠️  Django check found issues, attempting to fix..."
+              echo "🔄 Creating migrations for all apps..."
+              python manage.py makemigrations core
+              python manage.py makemigrations evaluations
+              python manage.py makemigrations users
+              python manage.py makemigrations notifications
+              echo "🔄 Running migrations..."
+              python manage.py migrate
+              echo "🔧 Running Django checks again..."
+              python manage.py check --deploy
+            fi
 
-            # Run migrations
+            # Run migrations (if not already run above)
             echo "🔄 Running migrations..."
             python manage.py migrate
 
@@ -174,9 +185,19 @@ jobs:
               echo "✅ Admin route is working"
             else
               echo "❌ Admin route has issues"
-              echo "📝 Running admin debug script..."
-              chmod +x deployment/debug_admin.sh
-              ./deployment/debug_admin.sh
+              echo "📝 Running comprehensive model fix..."
+              chmod +x deployment/fix_model_errors.sh
+              ./deployment/fix_model_errors.sh
+              
+              # Test admin route again after fix
+              echo "🧪 Testing admin route after fix..."
+              if curl -s -I http://localhost:8000/admin/ | grep -q "200\|302"; then
+                echo "✅ Admin route is now working after fix"
+              else
+                echo "❌ Admin route still has issues after fix"
+                echo "📝 Recent Django logs:"
+                sudo journalctl -u appraisal-production --no-pager -n 20
+              fi
             fi
 
             # Run startup services script

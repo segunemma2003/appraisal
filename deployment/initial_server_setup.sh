@@ -55,23 +55,31 @@ sed -i 's/DB_PASSWORD=.*/DB_PASSWORD=appraisal123/' .env
 
 # 10. Run Django migrations
 echo "🔄 Running database migrations..."
+python manage.py makemigrations core
+python manage.py makemigrations evaluations
+python manage.py makemigrations users
+python manage.py makemigrations notifications
 python manage.py migrate
 
 # 11. Create superuser (non-interactive)
 echo "👤 Creating superuser..."
 echo "from django.contrib.auth import get_user_model; User = get_user_model(); User.objects.create_superuser('admin', 'admin@apes.techonstreet.com', 'admin123') if not User.objects.filter(username='admin').exists() else None" | python manage.py shell
 
-# 12. Collect static files
+# 12. Run seed data script
+echo "🌱 Running seed data script..."
+python seed_data.py
+
+# 13. Collect static files
 echo "📦 Collecting static files..."
 python manage.py collectstatic --noinput
 
-# 13. Set up systemd services
+# 14. Set up systemd services
 echo "🔧 Setting up systemd services..."
 sudo cp deployment/appraisal-production.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable appraisal-production
 
-# 14. Set up Nginx (only for SSL termination)
+# 15. Set up Nginx (only for SSL termination)
 echo "🌐 Setting up Nginx for SSL termination..."
 sudo cp deployment/nginx.conf /etc/nginx/sites-available/appraisal-system
 sudo ln -sf /etc/nginx/sites-available/appraisal-system /etc/nginx/sites-enabled/
@@ -79,44 +87,44 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t
 sudo systemctl restart nginx
 
-# 15. Set up firewall (allow port 8000, don't interfere with port 80)
+# 16. Set up firewall (allow port 8000, don't interfere with port 80)
 echo "🔥 Configuring firewall..."
 sudo ufw allow ssh
 sudo ufw allow 8000
 sudo ufw allow 443
 sudo ufw --force enable
 
-# 16. Create log directory
+# 17. Create log directory
 echo "📝 Setting up logging..."
 mkdir -p logs
 sudo chown -R ubuntu:ubuntu logs
 
-# 17. Set up Redis
+# 18. Set up Redis
 echo "🔴 Configuring Redis..."
 sudo systemctl enable redis-server
 sudo systemctl start redis-server
 
-# 18. Set up Celery (if using)
+# 19. Set up Celery (if using)
 echo "🐐 Setting up Celery..."
 sudo cp deployment/celery.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable celery
 
-# 19. Set proper permissions
+# 20. Set proper permissions
 echo "🔐 Setting proper permissions..."
 sudo chown -R ubuntu:ubuntu /opt/appraisal-system
 chmod +x deployment/*.sh
 
-# 20. Start services
+# 21. Start services
 echo "🚀 Starting services..."
 sudo systemctl start appraisal-production
 sudo systemctl start celery
 
-# 21. Wait for services to start
+# 22. Wait for services to start
 echo "⏳ Waiting for services to start..."
 sleep 10
 
-# 22. Test services
+# 23. Test services
 echo "🧪 Testing services..."
 if sudo systemctl is-active --quiet appraisal-production; then
     echo "✅ Django app is running"
@@ -132,7 +140,7 @@ else
     sudo systemctl status nginx --no-pager -l
 fi
 
-# 23. Test connectivity
+# 24. Test connectivity
 echo "🧪 Testing connectivity..."
 if curl -s http://localhost:8000/health/ > /dev/null; then
     echo "✅ Django app is responding on port 8000"
@@ -140,7 +148,7 @@ else
     echo "❌ Django app is not responding on port 8000"
 fi
 
-# 24. Show final status
+# 25. Show final status
 echo ""
 echo "📋 Final Setup Status:"
 echo "   Django App: $(sudo systemctl is-active appraisal-production)"

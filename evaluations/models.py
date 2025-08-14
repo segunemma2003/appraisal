@@ -2,7 +2,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.core.cache import cache
 from django.utils import timezone
-from core.models import Department, ApprovalLevel, ApprovalWorkflow
+from core.models import Department
 from users.models import UserProfile
 
 
@@ -93,7 +93,7 @@ class KPITemplate(models.Model):
     is_template = models.BooleanField(default=False)
     template_category = models.CharField(max_length=50, blank=True)
     requires_approval = models.BooleanField(default=False)
-    approval_workflow = models.ForeignKey('ApprovalWorkflow', on_delete=models.SET_NULL, null=True, blank=True)
+    approval_workflow = models.ForeignKey('core.ApprovalWorkflow', on_delete=models.SET_NULL, null=True, blank=True)
     
     # Scoring and evaluation
     scoring_method = models.CharField(max_length=20, choices=[
@@ -286,7 +286,7 @@ class AppraisalFormTemplate(models.Model):
     target_departments = models.ManyToManyField(Department, blank=True)
     target_staff_levels = models.JSONField(default=list, blank=True)
     kpis = models.ManyToManyField(KPITemplate, through='FormKPI')
-    approval_workflow = models.ForeignKey('ApprovalWorkflow', on_delete=models.SET_NULL, null=True, blank=True)
+    approval_workflow = models.ForeignKey('core.ApprovalWorkflow', on_delete=models.SET_NULL, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -744,7 +744,7 @@ class EvaluationApproval(models.Model):
     ]
     
     evaluation_form = models.ForeignKey(EvaluationForm, on_delete=models.CASCADE, related_name='approvals')
-    approval_level = models.ForeignKey(ApprovalLevel, on_delete=models.CASCADE)
+    approval_level = models.ForeignKey('core.ApprovalLevel', on_delete=models.CASCADE)
     approver = models.ForeignKey(User, on_delete=models.CASCADE, related_name='evaluation_approvals')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     comments = models.TextField(blank=True)
