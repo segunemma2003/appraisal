@@ -98,6 +98,10 @@ jobs:
             echo "🌐 Updating ALLOWED_HOSTS..."
             sed -i 's/ALLOWED_HOSTS=.*/ALLOWED_HOSTS=apes.techonstreet.com,13.60.12.244,localhost,127.0.0.1/' .env
 
+            # Temporarily enable DEBUG for error visibility
+            echo "🐛 Enabling DEBUG mode for error visibility..."
+            sed -i 's/DEBUG=.*/DEBUG=True/' .env
+
             # Pull latest code
             echo "📥 Pulling latest code..."
             git pull origin main
@@ -112,6 +116,15 @@ jobs:
 
             # Run Django checks
             echo "🔧 Running Django checks..."
+            
+            # Check current DEBUG setting
+            echo "🐛 Current DEBUG setting:"
+            python manage.py shell -c "
+from django.conf import settings
+print(f'DEBUG: {settings.DEBUG}')
+print(f'ALLOWED_HOSTS: {settings.ALLOWED_HOSTS}')
+"
+            
             if ! python manage.py check --deploy; then
               echo "⚠️  Django check found issues, attempting to fix..."
               echo "🔄 Creating migrations for all apps..."
@@ -179,23 +192,42 @@ jobs:
               sudo journalctl -u appraisal-production --no-pager -n 20
             fi
 
-            # Test admin route
+            # Test admin route with detailed error capture
             echo "🧪 Testing admin route..."
-            if curl -s -I http://localhost:8000/admin/ | grep -q "200\|302"; then
-              echo "✅ Admin route is working"
+            ADMIN_RESPONSE=$(curl -s -w "%{http_code}" http://localhost:8000/admin/ -o /dev/null)
+            if [ "$ADMIN_RESPONSE" = "200" ] || [ "$ADMIN_RESPONSE" = "302" ]; then
+              echo "✅ Admin route is working (HTTP $ADMIN_RESPONSE)"
             else
-              echo "❌ Admin route has issues"
+              echo "❌ Admin route has issues (HTTP $ADMIN_RESPONSE)"
+              
+              # Capture detailed error response
+              echo "📝 Capturing detailed error response..."
+              curl -s -v http://localhost:8000/admin/ 2>&1 | head -50
+              
+              echo "📝 Recent Django logs:"
+              sudo journalctl -u appraisal-production --no-pager -n 30
+              
+              echo "📝 Django error log file:"
+              if [ -f "logs/django.log" ]; then
+                tail -50 logs/django.log
+              else
+                echo "No Django log file found"
+              fi
+              
               echo "📝 Running comprehensive model fix..."
               chmod +x deployment/fix_model_errors.sh
               ./deployment/fix_model_errors.sh
               
               # Test admin route again after fix
               echo "🧪 Testing admin route after fix..."
-              if curl -s -I http://localhost:8000/admin/ | grep -q "200\|302"; then
-                echo "✅ Admin route is now working after fix"
+              ADMIN_RESPONSE_AFTER=$(curl -s -w "%{http_code}" http://localhost:8000/admin/ -o /dev/null)
+              if [ "$ADMIN_RESPONSE_AFTER" = "200" ] || [ "$ADMIN_RESPONSE_AFTER" = "302" ]; then
+                echo "✅ Admin route is now working after fix (HTTP $ADMIN_RESPONSE_AFTER)"
               else
-                echo "❌ Admin route still has issues after fix"
-                echo "📝 Recent Django logs:"
+                echo "❌ Admin route still has issues after fix (HTTP $ADMIN_RESPONSE_AFTER)"
+                echo "📝 Final error capture:"
+                curl -s -v http://localhost:8000/admin/ 2>&1 | head -50
+                echo "📝 Final Django logs:"
                 sudo journalctl -u appraisal-production --no-pager -n 20
               fi
             fi
@@ -208,6 +240,15 @@ jobs:
             # Check firewall status
             echo "🔥 Checking firewall status..."
             sudo ufw status
+
+            # Disable DEBUG mode for production
+            echo "🔒 Disabling DEBUG mode for production..."
+            sed -i 's/DEBUG=.*/DEBUG=False/' .env
+            
+            # Restart service with production settings
+            echo "🔄 Restarting service with production settings..."
+            sudo systemctl restart appraisal-production
+            sleep 3
 
             # Show final status
             echo "📋 Final deployment status:"
