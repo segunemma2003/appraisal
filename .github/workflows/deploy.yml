@@ -116,15 +116,11 @@ jobs:
 
             # Run Django checks
             echo "🔧 Running Django checks..."
-            
+
             # Check current DEBUG setting
             echo "🐛 Current DEBUG setting:"
-            python manage.py shell -c "
-from django.conf import settings
-print(f'DEBUG: {settings.DEBUG}')
-print(f'ALLOWED_HOSTS: {settings.ALLOWED_HOSTS}')
-"
-            
+            python deployment/check_debug.py
+
             if ! python manage.py check --deploy; then
               echo "⚠️  Django check found issues, attempting to fix..."
               echo "🔄 Creating migrations for all apps..."
@@ -148,16 +144,7 @@ print(f'ALLOWED_HOSTS: {settings.ALLOWED_HOSTS}')
 
             # Check if superuser exists, create if not
             echo "👤 Checking superuser..."
-            python manage.py shell -c "
-            from django.contrib.auth import get_user_model
-            User = get_user_model()
-            if not User.objects.filter(is_superuser=True).exists():
-                print('Creating superuser...')
-                User.objects.create_superuser('admin', 'admin@apes.techonstreet.com', 'admin123')
-                print('Superuser created: admin/admin123')
-            else:
-                print('Superuser already exists')
-            "
+            python deployment/create_superuser.py
 
             # Run seed data script to populate default data
             echo "🌱 Running seed data script..."
@@ -244,7 +231,7 @@ print(f'ALLOWED_HOSTS: {settings.ALLOWED_HOSTS}')
             # Disable DEBUG mode for production
             echo "🔒 Disabling DEBUG mode for production..."
             sed -i 's/DEBUG=.*/DEBUG=False/' .env
-            
+
             # Restart service with production settings
             echo "🔄 Restarting service with production settings..."
             sudo systemctl restart appraisal-production
