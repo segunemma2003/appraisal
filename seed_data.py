@@ -779,18 +779,43 @@ def create_system_configurations():
 
 
 def create_superuser():
-    """Create a default superuser if none exists"""
-    if not User.objects.filter(is_superuser=True).exists():
-        user = User.objects.create_superuser(
-            username='admin',
-            email='admin@apes.techonstreet.com',
-            password='admin123'
-        )
-        print(f"✅ Created superuser: {user.username}")
-        return user
-    else:
-        print("⚠️  Superuser already exists")
-        return User.objects.filter(is_superuser=True).first()
+    """Create a default superuser with specific credentials"""
+    # Check if admin account with specific email already exists
+    admin_user = User.objects.filter(email='admin@admin.com').first()
+    
+    if admin_user:
+        print(f"✅ Admin account already exists: {admin_user.email}")
+        # Update password if needed
+        if not admin_user.check_password('admin123'):
+            admin_user.set_password('admin123')
+            admin_user.save()
+            print("✅ Updated admin password")
+        return admin_user
+    
+    # Check if any superuser exists
+    existing_superuser = User.objects.filter(is_superuser=True).first()
+    if existing_superuser:
+        print(f"⚠️  Superuser already exists: {existing_superuser.email}")
+        print("   Creating additional admin account with specified credentials...")
+    
+    # Create new admin account with specified credentials
+    user = User.objects.create_superuser(
+        username='admin',
+        email='admin@admin.com',
+        password='admin123'
+    )
+    
+    # Set additional user information
+    user.first_name = 'System'
+    user.last_name = 'Administrator'
+    user.is_staff = True
+    user.is_active = True
+    user.save()
+    
+    print(f"✅ Created admin account: {user.email}")
+    print(f"   Username: {user.username}")
+    print(f"   Password: admin123")
+    return user
 
 
 def main():
