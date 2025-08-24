@@ -797,13 +797,14 @@ def create_superuser():
     if existing_superuser:
         print(f"⚠️  Superuser already exists: {existing_superuser.email}")
         print("   Creating additional admin account with specified credentials...")
+        return None
     
     # Create new admin account with specified credentials
-        user = User.objects.create_superuser(
-            username='admin',
+    user = User.objects.create_superuser(
+        username='admin',
         email='admin@admin.com',
-            password='admin123'
-        )
+        password='admin123'
+    )
     
     # Set additional user information
     user.first_name = 'System'
@@ -815,7 +816,7 @@ def create_superuser():
     print(f"✅ Created admin account: {user.email}")
     print(f"   Username: {user.username}")
     print(f"   Password: admin123")
-        return user
+    return user
 
 
 def main():
