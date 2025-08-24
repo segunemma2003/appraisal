@@ -79,11 +79,11 @@ class Permission(models.Model):
         ('report', 'Report'),
     ]
 
-    codename = models.CharField(max_length=100, unique=True)
-    name = models.CharField(max_length=200)
+    codename = models.CharField(max_length=100, unique=True, default="")
+    name = models.CharField(max_length=200, default="")
     description = models.TextField(blank=True)
-    permission_type = models.CharField(max_length=20, choices=PERMISSION_TYPE_CHOICES)
-    resource_type = models.CharField(max_length=20, choices=RESOURCE_TYPE_CHOICES)
+    permission_type = models.CharField(max_length=20, choices=PERMISSION_TYPE_CHOICES, default='read')
+    resource_type = models.CharField(max_length=20, choices=RESOURCE_TYPE_CHOICES, default='evaluation')
     department_scope = models.ForeignKey(Department, on_delete=models.SET_NULL, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     is_system_permission = models.BooleanField(default=False)
@@ -125,8 +125,8 @@ class Role(models.Model):
         ('executive', 'Executive Level'),
     ]
 
-    name = models.CharField(max_length=200)
-    codename = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=200, default="")
+    codename = models.CharField(max_length=100, unique=True, default="")
     description = models.TextField(blank=True)
     role_type = models.CharField(max_length=20, choices=ROLE_TYPE_CHOICES, default='system')
     role_level = models.CharField(max_length=20, choices=ROLE_LEVEL_CHOICES, default='mid')
@@ -303,14 +303,14 @@ class PermissionOverride(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='permission_overrides')
     permission = models.ForeignKey(Permission, on_delete=models.CASCADE, related_name='permission_overrides')
-    override_type = models.CharField(max_length=10, choices=OVERRIDE_TYPE_CHOICES)
+    override_type = models.CharField(max_length=10, choices=OVERRIDE_TYPE_CHOICES, default='grant')
     
     # Temporal constraints
     start_date = models.DateTimeField(default=timezone.now)
     end_date = models.DateTimeField(null=True, blank=True)
     
     # Override metadata
-    reason = models.TextField()
+    reason = models.TextField(blank=True)
     granted_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='permission_grants')
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -351,7 +351,7 @@ class PermissionAudit(models.Model):
 
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='permission_audits')
     permission = models.ForeignKey(Permission, on_delete=models.CASCADE, related_name='permission_audits')
-    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES, default='granted')
     role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True)
     override = models.ForeignKey(PermissionOverride, on_delete=models.SET_NULL, null=True, blank=True)
     reason = models.TextField(blank=True)
@@ -375,8 +375,8 @@ class PermissionAudit(models.Model):
 
 class PermissionGroup(models.Model):
     """Groups of permissions for easier management"""
-    name = models.CharField(max_length=200)
-    codename = models.CharField(max_length=100, unique=True)
+    name = models.CharField(max_length=200, default="")
+    codename = models.CharField(max_length=100, unique=True, default="")
     description = models.TextField(blank=True)
     permissions = models.ManyToManyField(Permission, related_name='permission_groups')
     is_active = models.BooleanField(default=True)
@@ -396,8 +396,8 @@ class PermissionGroup(models.Model):
 
 class SystemConfiguration(models.Model):
     """System-wide configuration settings"""
-    key = models.CharField(max_length=100, unique=True)
-    value = models.TextField()
+    key = models.CharField(max_length=100, unique=True, default="")
+    value = models.TextField(default="")
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -442,8 +442,8 @@ class SystemConfiguration(models.Model):
 
 class ApprovalLevel(models.Model):
     """Approval levels for workflows"""
-    name = models.CharField(max_length=100)
-    level = models.PositiveIntegerField(unique=True)
+    name = models.CharField(max_length=100, default="")
+    level = models.PositiveIntegerField(unique=True, default=1)
     description = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -458,7 +458,7 @@ class ApprovalLevel(models.Model):
 
 class ApprovalWorkflow(models.Model):
     """Approval workflow definitions"""
-    name = models.CharField(max_length=100)
+    name = models.CharField(max_length=100, default="")
     description = models.TextField(blank=True)
     approval_levels = models.ManyToManyField(ApprovalLevel, through='ApprovalWorkflowLevel')
     is_active = models.BooleanField(default=True)
@@ -476,7 +476,7 @@ class ApprovalWorkflowLevel(models.Model):
     """Intermediate model for workflow levels"""
     workflow = models.ForeignKey(ApprovalWorkflow, on_delete=models.CASCADE)
     approval_level = models.ForeignKey(ApprovalLevel, on_delete=models.CASCADE)
-    order = models.PositiveIntegerField()
+    order = models.PositiveIntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -501,10 +501,10 @@ class AuditLog(models.Model):
     ]
     
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
-    action = models.CharField(max_length=20, choices=ACTION_CHOICES)
-    model_name = models.CharField(max_length=100)
-    object_id = models.PositiveIntegerField()
-    object_repr = models.CharField(max_length=200)
+    action = models.CharField(max_length=20, choices=ACTION_CHOICES, default='create')
+    model_name = models.CharField(max_length=100, default="")
+    object_id = models.PositiveIntegerField(default=0)
+    object_repr = models.CharField(max_length=200, default="")
     changes = models.JSONField(default=dict)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True)

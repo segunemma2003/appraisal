@@ -8,7 +8,7 @@ from core.models import Department, Position
 class UserProfile(models.Model):
     """Extended user profile information"""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
-    employee_id = models.CharField(max_length=20, unique=True)
+    employee_id = models.CharField(max_length=20, unique=True, default="")
     department = models.ForeignKey(Department, on_delete=models.SET_NULL, null=True, blank=True)
     position = models.ForeignKey(Position, on_delete=models.SET_NULL, null=True, blank=True)
     phone_number = models.CharField(max_length=20, blank=True)
@@ -38,7 +38,7 @@ class UserRole(models.Model):
     ]
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='roles')
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES)
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='staff')
     department = models.ForeignKey(Department, on_delete=models.CASCADE, null=True, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -79,8 +79,8 @@ class ProfileUpdateRequest(models.Model):
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='profile_update_requests')
     requested_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='profile_requests_made')
-    current_data = models.JSONField()
-    requested_changes = models.JSONField()
+    current_data = models.JSONField(default=dict)
+    requested_changes = models.JSONField(default=dict)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     reviewed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='profile_requests_reviewed')
     review_notes = models.TextField(blank=True)
@@ -98,9 +98,9 @@ class ProfileUpdateRequest(models.Model):
 class StaffQualification(models.Model):
     """Staff qualifications and certifications"""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='qualifications')
-    qualification_type = models.CharField(max_length=100)
-    qualification_name = models.CharField(max_length=200)
-    institution = models.CharField(max_length=200)
+    qualification_type = models.CharField(max_length=100, default="")
+    qualification_name = models.CharField(max_length=200, default="")
+    institution = models.CharField(max_length=200, default="")
     date_acquired = models.DateField()
     expiry_date = models.DateField(null=True, blank=True)
     certificate_number = models.CharField(max_length=100, blank=True)
@@ -122,7 +122,7 @@ class ActingAppointment(models.Model):
     department = models.ForeignKey(Department, on_delete=models.CASCADE)
     start_date = models.DateField()
     end_date = models.DateField()
-    reason = models.TextField()
+    reason = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -137,12 +137,12 @@ class ActingAppointment(models.Model):
 class StaffTraining(models.Model):
     """Staff training records"""
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='trainings')
-    training_name = models.CharField(max_length=200)
-    training_type = models.CharField(max_length=100)
-    institution = models.CharField(max_length=200)
+    training_name = models.CharField(max_length=200, default="")
+    training_type = models.CharField(max_length=100, default="")
+    institution = models.CharField(max_length=200, default="")
     start_date = models.DateField()
     end_date = models.DateField()
-    duration_hours = models.PositiveIntegerField()
+    duration_hours = models.PositiveIntegerField(default=0)
     certificate_received = models.BooleanField(default=False)
     skills_acquired = models.TextField(blank=True)
     impact_on_work = models.TextField(blank=True)

@@ -21,9 +21,9 @@ class Notification(models.Model):
     ]
     
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
-    notification_type = models.CharField(max_length=50, choices=NOTIFICATION_TYPE_CHOICES)
-    title = models.CharField(max_length=200)
-    message = models.TextField()
+    notification_type = models.CharField(max_length=50, choices=NOTIFICATION_TYPE_CHOICES, default='reminder')
+    title = models.CharField(max_length=200, blank=True)
+    message = models.TextField(blank=True)
     is_read = models.BooleanField(default=False)
     is_email_sent = models.BooleanField(default=False)
     
@@ -55,9 +55,9 @@ class Notification(models.Model):
 
 class EmailTemplate(models.Model):
     """Email templates for notifications"""
-    name = models.CharField(max_length=100, unique=True)
-    subject = models.CharField(max_length=200)
-    body = models.TextField()
+    name = models.CharField(max_length=100, unique=True, default="")
+    subject = models.CharField(max_length=200, blank=True)
+    body = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -79,8 +79,8 @@ class EmailLog(models.Model):
     
     recipient = models.ForeignKey(User, on_delete=models.CASCADE)
     template = models.ForeignKey(EmailTemplate, on_delete=models.CASCADE, null=True, blank=True)
-    subject = models.CharField(max_length=200)
-    body = models.TextField()
+    subject = models.CharField(max_length=200, blank=True)
+    body = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     error_message = models.TextField(blank=True)
     sent_at = models.DateTimeField(null=True, blank=True)
@@ -119,12 +119,12 @@ class SystemAnnouncement(models.Model):
         ('urgent', 'Urgent'),
     ]
     
-    title = models.CharField(max_length=200)
-    content = models.TextField()
+    title = models.CharField(max_length=200, blank=True)
+    content = models.TextField(blank=True)
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')
     is_active = models.BooleanField(default=True)
     is_public = models.BooleanField(default=True)
-    start_date = models.DateTimeField()
+    start_date = models.DateTimeField(default=timezone.now)
     end_date = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
