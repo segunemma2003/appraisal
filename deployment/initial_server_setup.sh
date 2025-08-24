@@ -55,11 +55,7 @@ sed -i 's/DB_PASSWORD=.*/DB_PASSWORD=appraisal123/' .env
 
 # 10. Run Django migrations
 echo "🔄 Running database migrations..."
-python manage.py makemigrations core
-python manage.py makemigrations evaluations
-python manage.py makemigrations users
-python manage.py makemigrations notifications
-python manage.py migrate
+python manage.py migrate --noinput
 
 # 11. Create superuser (non-interactive)
 echo "👤 Creating superuser..."

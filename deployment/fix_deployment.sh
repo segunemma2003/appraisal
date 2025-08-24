@@ -41,6 +41,10 @@ pip install -r requirements.txt
 echo "🔄 Running database migrations..."
 python manage.py migrate
 
+# 5.5. Run seed data script
+echo "🌱 Running seed data script..."
+python seed_data.py
+
 # 6. Collect static files
 echo "📦 Collecting static files..."
 python manage.py collectstatic --noinput
