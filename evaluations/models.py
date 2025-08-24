@@ -475,9 +475,9 @@ class EvaluationQuestion(models.Model):
     ]
     
     # Basic question information
-    question_text = models.CharField(max_length=500)
-    section = models.CharField(max_length=20, choices=SECTION_CHOICES)
-    question_type = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES)
+    question_text = models.CharField(max_length=500, default="")
+    section = models.CharField(max_length=20, choices=SECTION_CHOICES, default="personal_data")
+    question_type = models.CharField(max_length=20, choices=QUESTION_TYPE_CHOICES, default="text")
     
     # Role-based targeting
     target_roles = models.ManyToManyField('core.Role', blank=True, related_name='evaluation_questions')
@@ -763,10 +763,10 @@ class EvaluationApproval(models.Model):
 class EvaluationRecommendation(models.Model):
     """Final evaluation recommendations"""
     evaluation_form = models.ForeignKey(EvaluationForm, on_delete=models.CASCADE, related_name='recommendations')
-    overall_rating = models.PositiveIntegerField(choices=PerformanceRating.RATING_CHOICES)
-    strengths = models.TextField()
-    areas_for_improvement = models.TextField()
-    recommendations = models.TextField()
+    overall_rating = models.PositiveIntegerField(choices=PerformanceRating.RATING_CHOICES, default=3)
+    strengths = models.TextField(blank=True)
+    areas_for_improvement = models.TextField(blank=True)
+    recommendations = models.TextField(blank=True)
     recommended_by = models.ForeignKey(User, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -781,8 +781,8 @@ class EvaluationRecommendation(models.Model):
 class TrainingNeed(models.Model):
     """Identified training needs from evaluations"""
     evaluation_form = models.ForeignKey(EvaluationForm, on_delete=models.CASCADE, related_name='training_needs')
-    training_area = models.CharField(max_length=200)
-    description = models.TextField()
+    training_area = models.CharField(max_length=200, default="")
+    description = models.TextField(blank=True)
     priority = models.CharField(max_length=20, choices=[
         ('low', 'Low'),
         ('medium', 'Medium'),
@@ -803,10 +803,10 @@ class TrainingNeed(models.Model):
 class CareerDevelopmentPlan(models.Model):
     """Career development plans from evaluations"""
     evaluation_form = models.ForeignKey(EvaluationForm, on_delete=models.CASCADE, related_name='career_plans')
-    short_term_goals = models.TextField()
-    long_term_goals = models.TextField()
-    development_actions = models.TextField()
-    timeline = models.CharField(max_length=100)
+    short_term_goals = models.TextField(blank=True)
+    long_term_goals = models.TextField(blank=True)
+    development_actions = models.TextField(blank=True)
+    timeline = models.CharField(max_length=100, blank=True)
     mentor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='mentored_plans')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
