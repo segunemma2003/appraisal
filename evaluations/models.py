@@ -11,7 +11,7 @@ class EvaluationPeriod(models.Model):
     name = models.CharField(max_length=200)
     start_date = models.DateField()
     end_date = models.DateField()
-    submission_deadline = models.DateTimeField()
+    submission_deadline = models.DateTimeField(default=timezone.now)
     is_active = models.BooleanField(default=True)
     is_open_for_submission = models.BooleanField(default=False)
     description = models.TextField(blank=True)
@@ -496,7 +496,7 @@ class EvaluationQuestion(models.Model):
     required = models.BooleanField(default=True)
     order = models.PositiveIntegerField()
     weight = models.DecimalField(max_digits=5, decimal_places=2, default=1.00)
-    is_scored = models.BooleanField(default=True)
+    is_required = models.BooleanField(default=True)
     scoring_criteria = models.JSONField(default=dict, blank=True)
     
     # Conditional logic
@@ -569,7 +569,7 @@ class EvaluationQuestion(models.Model):
 
     def calculate_score(self, answer_value):
         """Calculate score based on answer and scoring criteria"""
-        if not self.is_scored or not answer_value:
+        if not self.is_required or not answer_value:
             return 0
         
         criteria = self.get_scoring_criteria()
@@ -616,7 +616,7 @@ class EvaluationQuestion(models.Model):
             required=self.required,
             order=new_order or self.order,
             weight=self.weight,
-            is_scored=self.is_scored,
+            is_required=self.is_required,
             scoring_criteria=self.scoring_criteria,
             is_template=True,
             template_category=self.template_category,
@@ -805,6 +805,7 @@ class CareerDevelopmentPlan(models.Model):
     evaluation_form = models.ForeignKey(EvaluationForm, on_delete=models.CASCADE, related_name='career_plans')
     short_term_goals = models.TextField(blank=True)
     long_term_goals = models.TextField(blank=True)
+    job_description = models.TextField(blank=True)
     development_actions = models.TextField(blank=True)
     timeline = models.CharField(max_length=100, blank=True)
     mentor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='mentored_plans')

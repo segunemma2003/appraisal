@@ -20,12 +20,12 @@ class Notification(models.Model):
         ('reminder', 'Reminder'),
     ]
     
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
+    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     notification_type = models.CharField(max_length=50, choices=NOTIFICATION_TYPE_CHOICES, default='reminder')
     title = models.CharField(max_length=200, blank=True)
     message = models.TextField(blank=True)
     is_read = models.BooleanField(default=False)
-    is_email_sent = models.BooleanField(default=False)
+    is_sent = models.BooleanField(default=False)
     
     # Generic foreign key for related objects
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, null=True, blank=True)
@@ -33,17 +33,17 @@ class Notification(models.Model):
     content_object = GenericForeignKey('content_type', 'object_id')
     
     created_at = models.DateTimeField(auto_now_add=True)
-    read_at = models.DateTimeField(null=True, blank=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['user', 'is_read']),
+            models.Index(fields=['recipient', 'is_read']),
             models.Index(fields=['notification_type']),
         ]
 
     def __str__(self):
-        return f"{self.user.username} - {self.title}"
+        return f"{self.recipient.username} - {self.title}"
 
     def mark_as_read(self):
         """Mark notification as read"""
@@ -97,12 +97,12 @@ class NotificationPreference(models.Model):
     """User notification preferences"""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='notification_preferences')
     email_notifications = models.BooleanField(default=True)
-    in_app_notifications = models.BooleanField(default=True)
+    deadline_reminders = models.BooleanField(default=True)
     evaluation_notifications = models.BooleanField(default=True)
     approval_notifications = models.BooleanField(default=True)
     profile_notifications = models.BooleanField(default=True)
     system_announcements = models.BooleanField(default=True)
-    reminder_notifications = models.BooleanField(default=True)
+    system_notifications = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
