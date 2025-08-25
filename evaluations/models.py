@@ -6,12 +6,17 @@ from core.models import Department
 from users.models import UserProfile
 
 
+def get_default_submission_deadline():
+    """Return current datetime as default for submission_deadline field"""
+    return timezone.now()
+
+
 class EvaluationPeriod(models.Model):
     """Evaluation periods and timeframes"""
     name = models.CharField(max_length=200)
     start_date = models.DateField()
     end_date = models.DateField()
-    submission_deadline = models.DateTimeField(default=timezone.now)
+    submission_deadline = models.DateTimeField(default=get_default_submission_deadline)
     is_active = models.BooleanField(default=True)
     is_open_for_submission = models.BooleanField(default=False)
     description = models.TextField(blank=True)

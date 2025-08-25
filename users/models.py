@@ -5,6 +5,11 @@ from django.utils import timezone
 from core.models import Department, Position
 
 
+def get_default_end_date():
+    """Return current date as default for end_date field"""
+    return timezone.now().date()
+
+
 class UserProfile(models.Model):
     """Extended user profile information"""
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
@@ -121,7 +126,7 @@ class ActingAppointment(models.Model):
     position = models.ForeignKey(Position, on_delete=models.CASCADE)
     department = models.ForeignKey(Department, on_delete=models.CASCADE, default=1)
     start_date = models.DateField()
-    end_date = models.DateField(default=timezone.now().date)
+    end_date = models.DateField(default=get_default_end_date)
     reason = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)

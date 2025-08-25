@@ -6,6 +6,11 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 
 
+def get_default_start_date():
+    """Return current datetime as default for start_date field"""
+    return timezone.now()
+
+
 class Notification(models.Model):
     """System notifications"""
     NOTIFICATION_TYPE_CHOICES = [
@@ -124,7 +129,7 @@ class SystemAnnouncement(models.Model):
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')
     is_active = models.BooleanField(default=True)
     is_public = models.BooleanField(default=True)
-    start_date = models.DateTimeField(default=timezone.now)
+    start_date = models.DateTimeField(default=get_default_start_date)
     end_date = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(User, on_delete=models.CASCADE)
     created_at = models.DateTimeField(auto_now_add=True)
